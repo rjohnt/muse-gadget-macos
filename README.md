@@ -62,6 +62,10 @@ Ask your Muse:
 
 An accepted command increments the preview's received count. A visible exact caption verifies delivery. A character verifies the separate download and rendering path. Failed image updates preserve the previous character. Images are fitted inside a 480×480 canvas and dithered to black and white, preserving PNG alpha transparency. An opaque source image retains its background; ask Muse for a transparent PNG to show only the avatar.
 
+## Hours preview
+
+Click the compact timeline to open the active prayer hour; the small × returns to Muse and its cards. The full timeline highlights the current hour, with arrows to browse and a Now control to resume following the clock. The header scrolls away with the prayers. Settings select Benedictine or modern hours and 12/24-hour time. This is an ordinary study preview with variable-text markers, not yet a verified calendar or complete rite-specific office.
+
 ## Commands
 
 | Command | Required parameters | Behavior |

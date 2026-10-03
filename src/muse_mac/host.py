@@ -103,8 +103,9 @@ async def request_character(session, state):
     try:
         result = await session.send_chat(
             'Please send your actual existing Muse character/avatar to the Mac display gadget that sent this message. '
-            'Use display.draw_url with a public HTTPS URL to a transparent-background PNG, ideally 480x480. '
-            'Show only your avatar, with no backdrop, background panel, or text baked into the image. '
+            'Call display.draw_url now with a public HTTPS URL to your existing avatar. '
+            'Prefer a transparent-background PNG, ideally 480x480, showing only the avatar with no backdrop or text. '
+            'If a transparent version is unavailable, send the existing avatar image first rather than withholding it. '
             'Use your own character, not an unrelated placeholder. Then call pocket.set_status with a short caption '
             'that does not repeat your name or introduce yourself. '
             'If you cannot access your character or either command fails, explain that in chat; do not claim success.'
