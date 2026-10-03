@@ -1,0 +1,15 @@
+name: Test Mac adapter
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv venv --python 3.12
+      - run: uv pip install -e '.[test]'
+      - run: .venv/bin/python -m pytest
+      - run: scripts/build-native.sh
+      - run: python3 scripts/check-secrets.py

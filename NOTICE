@@ -1,0 +1,15 @@
+Muse Gadget for macOS
+Copyright 2026 Muse Gadget for macOS contributors
+
+Uses the Muse Gadget SDK by Meta Platforms, Inc. and affiliates, under the
+Apache License, Version 2.0. The upstream package is an external pinned
+source dependency; its copyright notices remain with that package.
+https://github.com/facebookincubator/muse-gadget-sdk
+
+Original CoreBluetooth adapter, restricted display command implementation,
+and browser preview are licensed under Apache 2.0. This project is not
+endorsed by Meta or Xteink. No proprietary upstream avatar assets included.
+
+Includes Lucide 0.468.0 icons under ISC, with Feather-derived portions under
+MIT. See native/LUCIDE-LICENSE and the copy shipped with the Python package.
+https://lucide.dev

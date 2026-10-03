@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "muse-gadget-macos"
+version = "0.1.0"
+description = "Experimental CoreBluetooth pairing adapter and restricted Muse display gadget for macOS"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+dependencies = [
+  "musegadget @ git+https://github.com/facebookincubator/muse-gadget-sdk.git@b1a3822995a51c0203cd1f3d72c1c656b8c3e620#subdirectory=linux",
+  "Pillow>=11,<13",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[project.scripts]
+muse-mac = "muse_mac.host:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+muse_mac = ["preview.html", "icons.js", "LUCIDE-LICENSE"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
