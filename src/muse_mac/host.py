@@ -98,12 +98,12 @@ def verify_and_save(credentials, commit):
         raise ProvisionFailed('error_storage')
 
 
-async def run_connection(ident, token, state, stop):
+async def run_connection(ident, token, state, stop, display_name='MacMuse'):
     # Retain the upstream reconnect/rotation logic; replace its default shell
     # registry with display commands before constructing the service.
     service.COMMAND_SPECS = COMMANDS
     client = service.Service(ident, DisplayExecutor(state), sdk_token=token,
-                             display_name='Mac Pocket Preview')
+                             display_name=display_name)
     task = asyncio.create_task(client.run())
     try:
         while not stop.is_set() and not task.done():
@@ -130,10 +130,13 @@ def main():
     parser.add_argument('--state-dir', type=Path, default=Path.home() / 'Library/Application Support/MuseMacGadget')
     parser.add_argument('--native-app', type=Path, default=Path('build/Muse Mac Gadget.app'))
     parser.add_argument('--no-browser', action='store_true')
+    parser.add_argument('--name', default='MacMuse', help='Friendly name in Muse and the preview; BLE discovery identity stays unchanged')
     parser.add_argument('--advertisement', choices=['name-only', 'name-and-service'], default='name-only',
                         help='Prioritize the full name, or advertise the name and 128-bit service UUID')
     parser.add_argument('--timeout', type=int, default=600, help='Pairing window in seconds, 30–600')
     args = parser.parse_args()
+    if not args.name.strip() or len(args.name.encode('utf-8')) > 80 or any(ord(c)<32 for c in args.name):
+        parser.error('Friendly name must be 1–80 UTF-8 bytes without control characters')
     if platform.system() != 'Darwin' and args.mode != 'preview':
         parser.error('Pairing and live sessions require macOS')
     if not 30 <= args.timeout <= 600:
@@ -145,7 +148,7 @@ def main():
     signal.signal(signal.SIGINT, lambda *_: stop.set())
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
     state = DisplayState()
-    state.set(connection='offline preview' if args.mode == 'preview' else 'not paired')
+    state.set(connection='offline preview' if args.mode == 'preview' else 'not paired', display_name=args.name)
     transport = controller = None
     timer = None
     server = None
@@ -163,6 +166,8 @@ def main():
                 raise ValueError('Already paired; use run. Use a different state directory to create another gadget.')
             if args.mode == 'run' and not config.load_json(config.PAIRING_FILE):
                 raise ValueError('Not paired yet; use pair first')
+            if args.mode == 'run':
+                state.set(pairing_confirmed=True, bluetooth='setup complete')
         if args.mode == 'pair':
             executable = args.native_app.resolve() / 'Contents/MacOS/MuseMacPeripheral'
             if not executable.is_file():
@@ -223,7 +228,7 @@ def main():
         if args.mode == 'preview':
             stop.wait()
         else:
-            asyncio.run(run_connection(ident, token, state, stop))
+            asyncio.run(run_connection(ident, token, state, stop, args.name))
     except (ValueError, OSError) as exc:
         # Only our deliberate validation messages are printed, never arbitrary
         # OS/network paths or upstream exception text.
