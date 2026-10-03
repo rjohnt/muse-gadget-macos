@@ -130,6 +130,8 @@ def main():
     parser.add_argument('--state-dir', type=Path, default=Path.home() / 'Library/Application Support/MuseMacGadget')
     parser.add_argument('--native-app', type=Path, default=Path('build/Muse Mac Gadget.app'))
     parser.add_argument('--no-browser', action='store_true')
+    parser.add_argument('--advertisement', choices=['name-only', 'name-and-service'], default='name-only',
+                        help='Prioritize the full name, or advertise the name and 128-bit service UUID')
     parser.add_argument('--timeout', type=int, default=600, help='Pairing window in seconds, 30–600')
     args = parser.parse_args()
     if platform.system() != 'Darwin' and args.mode != 'preview':
@@ -188,7 +190,8 @@ def main():
                         stop.set()
             transport = MacTransport(executable, ident.ble_name,
                 on_write=lambda packet: controller.on_write(packet),
-                on_disconnect=lambda: controller.on_disconnect(), on_state=on_state)
+                on_disconnect=lambda: controller.on_disconnect(), on_state=on_state,
+                advertisement=args.advertisement)
             def completed():
                 state.set(connection='paired; connecting')
                 if timer:

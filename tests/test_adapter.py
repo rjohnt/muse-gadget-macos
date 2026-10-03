@@ -116,3 +116,19 @@ def test_preview_read_only_no_token_and_invalid_host():
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_transport_advertisement_modes_and_process_arguments(monkeypatch):
+    from muse_mac.transport import MacTransport
+    from unittest.mock import Mock
+    popen = Mock()
+    monkeypatch.setattr('muse_mac.transport.subprocess.Popen', popen)
+    monkeypatch.setattr('muse_mac.transport.threading.Thread.start', lambda self: None)
+    transport = MacTransport(Path('/test/native'), 'MuseGadget123456', lambda _: None, lambda: None, lambda _: None)
+    transport.start()
+    assert popen.call_args.args[0] == ['/test/native', 'MuseGadget123456', 'name-only']
+    transport = MacTransport(Path('/test/native'), 'MuseGadget123456', lambda _: None, lambda: None, lambda _: None, advertisement='name-and-service')
+    transport.start()
+    assert popen.call_args.args[0][-1] == 'name-and-service'
+    with pytest.raises(ValueError):
+        MacTransport(Path('/test/native'), 'MuseGadget123456', lambda _: None, lambda: None, lambda _: None, advertisement='invalid')

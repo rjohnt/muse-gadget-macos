@@ -6,9 +6,9 @@ This is a community project, not an official Meta or Xteink product. The adapter
 
 ## Status
 
-The native adapter compiles and CoreBluetooth reports advertising on an Apple Silicon Mac. The current Muse iOS app did **not** discover the test advertisement; the reason is not yet established. Seven local adapter tests and the pinned SDK's 137 tests pass. Phone discovery, end-to-end pairing and delivery remain unverified. Do not interpret the browser preview or an advertising state as a successful Muse connection.
+The native adapter compiles and CoreBluetooth reports advertising on an Apple Silicon Mac. An independent iPhone BLE scanner found the SDK service on an unnamed peripheral, while Muse did **not** discover the combined name/service advertisement. A name-only advertising mode now attempts to avoid macOS dropping the longer name; Muse discovery in that mode remains unverified. Eight local adapter tests and the pinned SDK's 137 tests pass. End-to-end pairing and delivery remain unverified. Do not interpret the browser preview or an advertising state as a successful Muse connection.
 
-CoreBluetooth advertises the SDK service UUID and gadget name. Apple's peripheral advertising API does not expose BlueZ's arbitrary manufacturer-data field. Whether a particular Muse app version requires that field must be checked with the phone. The Mac adapter cannot actively cancel a central's connection; failed setup tears down the GATT service and requires restarting pairing.
+By default, CoreBluetooth advertises only the complete gadget name. The SDK service and characteristics remain published in GATT and available after connecting. `--advertisement name-and-service` also puts the 128-bit service UUID in the advertisement, but macOS can drop the longer name when space is tight. Name-only mode cannot work with a scanner that requires that UUID in the advertisement; combined mode may fail a scanner requiring the name. These app compatibility limits need physical testing. Apple's peripheral advertising API also does not expose BlueZ's arbitrary manufacturer-data field. Whether a Muse app version requires that field must be checked with the phone. The Mac adapter cannot actively cancel a central's connection; failed setup tears down the GATT service and requires restarting pairing.
 
 ## Requirements
 
@@ -42,7 +42,7 @@ The pairing window closes after ten minutes. Successful pairing continues into a
 .venv/bin/muse-mac run
 ```
 
-If Muse finds no devices, use an independent BLE scanner on the phone to check the exact name and service UUID `7fdd3d1c-38ea-46cf-8b46-314ecf5f240c`. A scanner seeing the advertisement while Muse does not would point to app filtering/compatibility; neither seeing it requires investigating the radio/advertising path. Check Bluetooth access for Muse in the phone's privacy settings. Restart `pair` to open a fresh window; it retains the gadget identity and refuses to overwrite an existing pairing.
+If Muse finds no devices, use an independent BLE scanner on the phone to check the exact name. After connecting, look for GATT service UUID `7fdd3d1c-38ea-46cf-8b46-314ecf5f240c`; in name-only mode it is not in the advertisement itself. A scanner seeing the advertisement while Muse does not would point to app filtering/compatibility; neither seeing it requires investigating the radio/advertising path. Check Bluetooth access for Muse in the phone's privacy settings. Disconnect from the scanner before retrying Muse. Restart `pair` to open a fresh window; it retains the gadget identity and refuses to overwrite an existing pairing.
 
 To view the empty interface without credentials or Bluetooth:
 

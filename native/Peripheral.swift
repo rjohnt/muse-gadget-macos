@@ -12,6 +12,7 @@ func emit(_ message: [String: Any]) {
 final class Peripheral: NSObject, CBPeripheralManagerDelegate {
     var manager: CBPeripheralManager!
     let localName: String
+    let advertisementMode: String
     let serviceID = CBUUID(string: "7fdd3d1c-38ea-46cf-8b46-314ecf5f240c")
     let rxID = CBUUID(string: "4d593029-28a2-4a6e-a1f0-3c2d5e8f9b01")
     let txID = CBUUID(string: "d75dc4ca-7b2b-4e9c-8f0a-1d2e3f4a5b6c")
@@ -20,8 +21,9 @@ final class Peripheral: NSObject, CBPeripheralManagerDelegate {
     var pending: [Data] = []
     var advertisingWanted = true
 
-    init(name: String) {
+    init(name: String, advertisementMode: String) {
         localName = name
+        self.advertisementMode = advertisementMode
         super.init()
         manager = CBPeripheralManager(delegate: self, queue: .main)
     }
@@ -37,7 +39,14 @@ final class Peripheral: NSObject, CBPeripheralManagerDelegate {
     }
     func peripheralManager(_ peripheral: CBPeripheralManager, didAdd service: CBService, error: Error?) {
         guard error == nil else { emit(["event": "error", "code": "service_failed"]); return }
-        if advertisingWanted { peripheral.startAdvertising([CBAdvertisementDataLocalNameKey: localName, CBAdvertisementDataServiceUUIDsKey: [serviceID]]) }
+        if advertisingWanted {
+            var payload: [String: Any] = [CBAdvertisementDataLocalNameKey: localName]
+            // macOS can discard long local names when a 128-bit UUID consumes
+            // the primary advertisement. The GATT service remains published
+            // in either mode; only its presence in the advert changes.
+            if advertisementMode == "name-and-service" { payload[CBAdvertisementDataServiceUUIDsKey] = [serviceID] }
+            peripheral.startAdvertising(payload)
+        }
     }
     func peripheralManagerDidStartAdvertising(_ peripheral: CBPeripheralManager, error: Error?) {
         emit(["event": error == nil ? "advertising" : "error", "code": error == nil ? "ready" : "advertising_failed"])
@@ -97,10 +106,12 @@ final class Peripheral: NSObject, CBPeripheralManagerDelegate {
 
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
-guard CommandLine.arguments.count == 2 else { exit(2) }
+guard CommandLine.arguments.count == 3 else { exit(2) }
 let name = CommandLine.arguments[1]
 guard name.range(of: "^MuseGadget[0-9A-F]{6}$", options: .regularExpression) != nil else { exit(2) }
-let adapter = Peripheral(name: name)
+let mode = CommandLine.arguments[2]
+guard ["name-only", "name-and-service"].contains(mode) else { exit(2) }
+let adapter = Peripheral(name: name, advertisementMode: mode)
 DispatchQueue.global().async {
     while let line = readLine() {
         guard line.utf8.count <= 4096, let data = line.data(using: .utf8), let record = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { continue }

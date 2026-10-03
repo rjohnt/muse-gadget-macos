@@ -9,16 +9,19 @@ from musegadget.ble_framing import CHUNK_STAGGER_S
 
 
 class MacTransport:
-    def __init__(self, executable, name, on_write, on_disconnect, on_state):
+    def __init__(self, executable, name, on_write, on_disconnect, on_state, advertisement='name-only'):
         self.executable, self.name = executable, name
         self.on_write, self.on_disconnect, self.on_state = on_write, on_disconnect, on_state
+        if advertisement not in ('name-only', 'name-and-service'):
+            raise ValueError('Invalid advertisement mode')
+        self.advertisement = advertisement
         self._mtu = 23
         self._lock = threading.Lock()
         self._process = None
         self._closed = threading.Event()
 
     def start(self):
-        self._process = subprocess.Popen([str(self.executable), self.name], stdin=subprocess.PIPE,
+        self._process = subprocess.Popen([str(self.executable), self.name, self.advertisement], stdin=subprocess.PIPE,
                                          stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                                          text=True, bufsize=1)
         threading.Thread(target=self._read, daemon=True).start()
