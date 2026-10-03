@@ -8,7 +8,14 @@ https://github.com/facebookincubator/muse-gadget-sdk
 
 Original CoreBluetooth adapter, restricted display command implementation,
 and browser preview are licensed under Apache 2.0. This project is not
-endorsed by Meta or Xteink. No proprietary upstream avatar assets included.
+endorsed by Meta or Xteink.
+
+The README hero includes an AI-generated dot-matrix interpretation of the
+Jolly character, derived from a supplied reference. That character artwork
+is excluded from this project’s Apache 2.0 grant. The upstream SDK explicitly
+excludes its Jollybot avatar from its Apache license; this notice does not
+grant rights to the underlying character. Muse and Apple marks identify the
+respective products and are not covered by this project’s source-code license.
 
 Includes Lucide 0.468.0 icons under ISC, with Feather-derived portions under
 MIT. See native/LUCIDE-LICENSE and the copy shipped with the Python package.

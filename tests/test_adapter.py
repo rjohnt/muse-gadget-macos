@@ -38,8 +38,8 @@ def test_commands_restricted_and_failed_updates_preserve_previous():
     executor = DisplayExecutor(state)
     assert all(key not in COMMANDS for key in ('system.run', 'file.read', 'file.write', 'device.ota'))
     assert not executor.run('system.run', {'command': 'echo unsafe'})['ok']
-    assert executor.run('pocket.set_status', {'text': 'SDK connection verified'})['ok']
-    assert not executor.run('pocket.set_status', {'text': 'x' * 241})['ok']
+    assert executor.run('display.set_caption', {'text': 'SDK connection verified'})['ok']
+    assert not executor.run('display.set_caption', {'text': 'x' * 241})['ok']
     assert state.snapshot()['caption'] == 'SDK connection verified'
     state.image = b'previous'
     with patch('muse_mac.commands.download_image', side_effect=OSError('signed secret URL')):
@@ -50,35 +50,12 @@ def test_commands_restricted_and_failed_updates_preserve_previous():
     assert state.snapshot()['commands_received'] == 1
 
 
-def test_watch_contract_staleness_and_atomic_validation():
-    state = DisplayState()
-    executor = DisplayExecutor(state)
-    payload = {'updated': '2000-01-01T10:00:00Z', 'items': [{'label': 'Example', 'state': 'watching', 'note': 'Awaiting update', 'checked': '2000-01-01T09:00:00Z'}]}
-    assert executor.run('pocket.set_watch_digest', {'payload': json.dumps(payload)})['ok']
-    assert state.snapshot()['watches']['stale']
-    payload['items'][0]['checked'] = '2000-01-01T09:00'
-    assert not executor.run('pocket.set_watch_digest', {'payload': json.dumps(payload)})['ok']
-    assert state.snapshot()['watches']['items'][0]['checked'].endswith('Z')
-    payload['items'] = []
-    assert executor.run('pocket.set_watch_digest', {'payload': json.dumps(payload)})['ok']
-    assert state.snapshot()['watches']['items'] == []
-
-
-def test_event_expiry_and_timezone_requirement():
-    state = DisplayState()
-    executor = DisplayExecutor(state)
-    payload = {'updated': '2000-01-01T10:00:00Z', 'title': 'Example', 'when': '2000-01-01T11:00:00Z', 'ends': '2000-01-01T11:30:00Z'}
-    assert executor.run('pocket.set_next_up', {'payload': json.dumps(payload)})['ok']
-    assert state.snapshot()['next_up'] is None
-    payload['ends'] = '2000-01-01T10:00:00Z'
-    assert not executor.run('pocket.set_next_up', {'payload': json.dumps(payload)})['ok']
-    assert state.data['next_up']['ends'] == '2000-01-01T11:30:00Z'
 
 
 def test_health_does_not_return_private_content():
     state = DisplayState()
     state.set(caption='private sample content')
-    result = DisplayExecutor(state).run('pocket.get_status', {})
+    result = DisplayExecutor(state).run('display.get_status', {})
     assert result['ok']
     assert 'private sample' not in json.dumps(result)
 
@@ -169,18 +146,42 @@ def test_transparent_character_keeps_alpha():
     assert image.getpixel((240, 240))[3] == 128
 
 
-def test_cards_request_is_explicit_and_does_not_expose_response():
+def test_empty_application_registry_stays_empty(monkeypatch):
     import asyncio
-    from muse_mac.host import request_cards
-    from unittest.mock import AsyncMock
-    state = DisplayState()
-    session = type('Session', (), {})()
-    session.send_chat = AsyncMock(return_value={'ok': True, 'response': 'private response'})
-    asyncio.run(request_cards(session, state))
-    assert state.snapshot()['cards_request'] == 'sent'
-    assert 'private response' not in json.dumps(state.snapshot())
-    prompt = session.send_chat.call_args.args[0]
-    assert 'pocket.set_watch_digest' in prompt and 'pocket.set_next_up' in prompt
-    session.send_chat = AsyncMock(side_effect=RuntimeError('private response'))
-    asyncio.run(request_cards(session, state))
-    assert state.snapshot()['cards_request'] == 'failed'
+    import threading
+    from muse_mac import host
+    from unittest.mock import AsyncMock, Mock
+    client = Mock()
+    client.run = AsyncMock()
+    monkeypatch.setattr(host.service, 'Service', Mock(return_value=client))
+    monkeypatch.setattr(host.service, 'COMMAND_SPECS', host.COMMANDS)
+    stop = threading.Event()
+    stop.set()
+    asyncio.run(host.run_connection(None, None, DisplayState(), stop,
+                application=host.Application(command_specs={})))
+    assert host.service.COMMAND_SPECS == {}
+
+
+def test_custom_preview_routes_keep_host_and_input_checks(tmp_path):
+    page = tmp_path / 'preview.html'
+    page.write_text('<p>Example application</p>')
+    def route(query):
+        if query.get('date') != ['2026-10-03']:
+            raise ValueError('private implementation detail')
+        return b'{"available":true}', 'application/json'
+    server = serve_preview(DisplayState(), page, {'/office': route})
+    base = f'http://127.0.0.1:{server.server_port}'
+    try:
+        assert urllib.request.urlopen(base).read() == page.read_bytes()
+        assert json.load(urllib.request.urlopen(base + '/office?date=2026-10-03'))['available']
+        with pytest.raises(urllib.error.HTTPError) as error:
+            urllib.request.urlopen(base + '/office')
+        assert error.value.code == 400
+        assert b'private implementation detail' not in error.value.read()
+        with pytest.raises(urllib.error.HTTPError) as error:
+            urllib.request.urlopen(urllib.request.Request(base + '/office?date=2026-10-03',
+                headers={'Host': 'evil.example'}))
+        assert error.value.code == 403
+    finally:
+        server.shutdown()
+        server.server_close()

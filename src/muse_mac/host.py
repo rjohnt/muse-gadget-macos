@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Pair a restricted Mac display gadget, then serve real Muse commands."""
 import argparse
+from dataclasses import dataclass
 import asyncio
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -21,12 +22,25 @@ from .secrets import read_token
 from .transport import MacTransport
 
 
+@dataclass
+class Application:
+    """Optional application layer; the adapter owns transport, not product features."""
+    caption_command: str = 'display.set_caption'
+    state_factory: object = DisplayState
+    executor_factory: object = DisplayExecutor
+    command_specs: object = None
+    preview_path: object = None
+    routes: object = None
+    configure_parser: object = None
+    on_registered: object = None
+
+
 class PreviewServer(ThreadingHTTPServer):
     daemon_threads = True
 
 
-def serve_preview(state):
-    html = Path(__file__).with_name('preview.html').read_bytes()
+def serve_preview(state, preview_path=None, routes=None):
+    html_path = Path(preview_path) if preview_path else Path(__file__).with_name('preview.html')
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *_args):
             pass
@@ -37,11 +51,17 @@ def serve_preview(state):
                 return
             path = urllib.parse.urlsplit(self.path).path
             if path == '/':
-                body, kind = html, 'text/html; charset=utf-8'
+                body, kind = html_path.read_bytes(), 'text/html; charset=utf-8'
             elif path == '/icons.js':
                 body, kind = Path(__file__).with_name('icons.js').read_bytes(), 'text/javascript'
             elif path == '/state':
                 body, kind = json.dumps(state.snapshot()).encode(), 'application/json'
+            elif routes and path in routes:
+                try:
+                    body, kind = routes[path](urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query))
+                except (ValueError, KeyError):
+                    self.send_error(400, 'Invalid preview request')
+                    return
             elif path == '/image':
                 with state.lock:
                     body = state.image
@@ -98,7 +118,7 @@ def verify_and_save(credentials, commit):
         raise ProvisionFailed('error_storage')
 
 
-async def request_character(session, state):
+async def request_character(session, state, caption_command='display.set_caption'):
     state.set(avatar_request='pending')
     try:
         result = await session.send_chat(
@@ -106,7 +126,7 @@ async def request_character(session, state):
             'Call display.draw_url now with a public HTTPS URL to your existing avatar. '
             'Prefer a transparent-background PNG, ideally 480x480, showing only the avatar with no backdrop or text. '
             'If a transparent version is unavailable, send the existing avatar image first rather than withholding it. '
-            'Use your own character, not an unrelated placeholder. Then call pocket.set_status with a short caption '
+            f'Use your own character, not an unrelated placeholder. Then call {caption_command} with a short caption '
             'that does not repeat your name or introduce yourself. '
             'If you cannot access your character or either command fails, explain that in chat; do not claim success.'
         )
@@ -115,32 +135,16 @@ async def request_character(session, state):
         state.set(avatar_request='failed')
 
 
-async def request_cards(session, state):
-    state.set(cards_request='pending')
-    try:
-        result = await session.send_chat(
-            'Populate this Mac display gadget with my actual current open watches and next upcoming event. '
-            'Call pocket.set_watch_digest and pocket.set_next_up using their registered schemas; '
-            'each payload argument must be a serialized JSON string. Use timezone-qualified ISO timestamps. '
-            'The next event needs when and ends; if the end is unavailable, explain that rather than inventing it. '
-            'Curate concise labels and notes for a small display. Do not include account numbers or credentials. '
-            'Use only data you can access now. If there are no watches send an empty items list; '
-            'if there is no upcoming event send an empty title. Explain any failed command in chat.'
-        )
-        state.set(cards_request='sent' if result.get('ok') else 'failed')
-    except Exception:
-        state.set(cards_request='failed')
-
-
-async def run_connection(ident, token, state, stop, display_name='MacMuse', request_avatar=False, request_live_cards=False):
+async def run_connection(ident, token, state, stop, display_name='MacMuse', request_avatar=False, application=None, args=None):
     # Retain the upstream reconnect/rotation logic; replace its default shell
     # registry with display commands before constructing the service.
-    service.COMMAND_SPECS = COMMANDS
-    client = service.Service(ident, DisplayExecutor(state), sdk_token=token,
+    application = application or Application()
+    service.COMMAND_SPECS = COMMANDS if application.command_specs is None else application.command_specs
+    client = service.Service(ident, application.executor_factory(state), sdk_token=token,
                              display_name=display_name)
     task = asyncio.create_task(client.run())
     requested = False
-    cards_requested = False
+    application_requested = False
     try:
         while not stop.is_set() and not task.done():
             session = client._current
@@ -151,10 +155,10 @@ async def run_connection(ident, token, state, stop, display_name='MacMuse', requ
             state.set(connection='connected' if registered else 'connecting' if paired else 'ready to pair' if advertising else 'not paired')
             if registered and request_avatar and not requested:
                 requested = True
-                await request_character(session, state)
-            if registered and request_live_cards and not cards_requested:
-                cards_requested = True
-                await request_cards(session, state)
+                await request_character(session, state, application.caption_command)
+            if registered and application.on_registered and not application_requested:
+                application_requested = True
+                await application.on_registered(session, state, args)
             await asyncio.sleep(0.5)
         client.stop()
         await task
@@ -165,7 +169,8 @@ async def run_connection(ident, token, state, stop, display_name='MacMuse', requ
         state.set(connection='stopped')
 
 
-def main():
+def main(application=None):
+    application = application or Application()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('mode', choices=['pair', 'run', 'preview'])
     parser.add_argument('--env-file', type=Path, default=Path('.env'))
@@ -175,10 +180,11 @@ def main():
     parser.add_argument('--name', default='MacMuse', help='Friendly name in Muse and the preview; BLE discovery identity stays unchanged')
     parser.add_argument('--character-name', default='Your Muse', help='Heading below the character in the preview')
     parser.add_argument('--request-avatar', action='store_true', help='Ask Muse once, after registration, to send its actual character to this display')
-    parser.add_argument('--request-cards', action='store_true', help='Ask Muse once to send current watches and the next event')
     parser.add_argument('--advertisement', choices=['name-only', 'name-and-service'], default='name-only',
                         help='Prioritize the full name, or advertise the name and 128-bit service UUID')
     parser.add_argument('--timeout', type=int, default=600, help='Pairing window in seconds, 30–600')
+    if application.configure_parser:
+        application.configure_parser(parser)
     args = parser.parse_args()
     if not args.name.strip() or len(args.name.encode('utf-8')) > 80 or any(ord(c)<32 for c in args.name):
         parser.error('Friendly name must be 1–80 UTF-8 bytes without control characters')
@@ -194,7 +200,7 @@ def main():
     stop = threading.Event()
     signal.signal(signal.SIGINT, lambda *_: stop.set())
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
-    state = DisplayState()
+    state = application.state_factory()
     state.set(connection='offline preview' if args.mode == 'preview' else 'not paired', display_name=args.name, character_name=args.character_name)
     transport = controller = None
     timer = None
@@ -267,7 +273,7 @@ def main():
             timer.daemon = True
             timer.start()
             print(f'In Muse: Settings > Devices > Add Device > {ident.ble_name}', flush=True)
-        server = serve_preview(state)
+        server = serve_preview(state, application.preview_path, application.routes)
         url = f'http://127.0.0.1:{server.server_port}/'
         print(f'Preview: {url}', flush=True)
         if not args.no_browser:
@@ -275,7 +281,7 @@ def main():
         if args.mode == 'preview':
             stop.wait()
         else:
-            asyncio.run(run_connection(ident, token, state, stop, args.name, args.request_avatar, args.request_cards))
+            asyncio.run(run_connection(ident, token, state, stop, args.name, args.request_avatar, application, args))
     except (ValueError, OSError) as exc:
         # Only our deliberate validation messages are printed, never arbitrary
         # OS/network paths or upstream exception text.

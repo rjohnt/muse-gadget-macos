@@ -1,14 +1,31 @@
 # Muse Gadget for macOS
 
-An experimental CoreBluetooth adapter for the [Muse Gadget SDK](https://github.com/facebookincubator/muse-gadget-sdk), plus a restricted display gadget and live browser preview. Pair a Mac with the Muse phone app, receive a character and caption, and try small watch/event cards before moving a UI onto hardware.
+![Native macOS Bluetooth pairs with the Muse app; requests and updates then travel through the SDK’s encrypted Internet session.](diagram/mac-muse-flow/takes/a-hero.png)
+
+An experimental CoreBluetooth adapter for the [Muse Gadget SDK](https://github.com/facebookincubator/muse-gadget-sdk), plus a restricted display gadget and live browser preview. Pair a Mac with the Muse phone app, receive a character and caption, and test explicitly registered display commands before moving onto hardware.
 
 This is a community project, not an official Meta or Xteink product. The adapter reuses upstream pairing v5, encrypted Noise sessions, device-token rotation and reconnect behavior. It replaces the Linux BlueZ peripheral with a small native Swift process. No shell, arbitrary file, or firmware-update commands are registered.
 
-## Status
+## Why this exists
 
-Phone discovery, encrypted community pairing, device-credential provisioning and authenticated Muse command registration have been verified on an Apple Silicon Mac with the Muse iOS app. The initial combined name/service advertisement appeared unnamed and was not discovered by Muse. Name-only advertising delivered the complete `MuseGadgetXXXXXX` name and enabled pairing. Actual character-image and caption command delivery have also been verified. Local adapter tests and the pinned SDK's 137 tests pass; physical-reader behavior remains untested.
+The pinned SDK’s desktop pairing implementation uses Linux BlueZ, so it cannot
+advertise a gadget on macOS without a different Bluetooth transport. This adapter
+provides that transport through native CoreBluetooth, while leaving pairing and
+the encrypted Muse session in the upstream SDK.
 
-By default, CoreBluetooth advertises only the complete gadget name. The SDK service and characteristics remain published in GATT and available after connecting. `--advertisement name-and-service` also puts the 128-bit service UUID in the advertisement, but macOS can drop the longer name when space is tight. Name-only mode cannot work with a scanner that requires that UUID in the advertisement; combined mode may fail a scanner requiring the name. These app compatibility limits need physical testing. Apple's peripheral advertising API also does not expose BlueZ's arbitrary manufacturer-data field. Whether a Muse app version requires that field must be checked with the phone. The Mac adapter cannot actively cancel a central's connection; failed setup tears down the GATT service and requires restarting pairing.
+Our first Mac attempt reported **advertising**, but Muse on the iPhone found no
+device. LightBlue could see the peripheral and its SDK service; the combined
+name/service advertisement was not exposing the complete discovery name.
+Switching to **name-only advertising** made the gadget discoverable and allowed
+pairing. The service remains available after connecting.
+
+The [Bluetooth debugging guide](docs/bluetooth-debugging.md) walks through that
+failure and separates discovery, pairing, authenticated registration, and actual
+caption/avatar delivery. Those stages are the reason for the preview’s diagnostics.
+
+Phone pairing, authenticated registration, and real caption/avatar delivery have
+been observed on an Apple Silicon Mac with Muse for iOS. This is an experimental
+adapter, not a compatibility guarantee across app/OS versions or a hardware test.
 
 ## Requirements
 
@@ -42,7 +59,7 @@ The pairing window closes after ten minutes. Successful pairing continues into a
 .venv/bin/muse-mac run
 ```
 
-If Muse finds no devices, use an independent BLE scanner on the phone to check the exact name. After connecting, look for GATT service UUID `7fdd3d1c-38ea-46cf-8b46-314ecf5f240c`; in name-only mode it is not in the advertisement itself. A scanner seeing the advertisement while Muse does not would point to app filtering/compatibility; neither seeing it requires investigating the radio/advertising path. Check Bluetooth access for Muse in the phone's privacy settings. Disconnect from the scanner before retrying Muse. Restart `pair` to open a fresh window; it retains the gadget identity and refuses to overwrite an existing pairing.
+If Muse finds no devices, follow the [LightBlue checks](docs/bluetooth-debugging.md#muse-finds-no-nearby-devices).
 
 To view the empty interface without credentials or Bluetooth:
 
@@ -50,46 +67,49 @@ To view the empty interface without credentials or Bluetooth:
 .venv/bin/muse-mac preview
 ```
 
-`--character-name NAME` sets the heading beneath the avatar. `--name NAME` sets the friendly name shown in Muse and the preview (default **MacMuse**); it keeps the app-compatible `MuseGadgetXXXXXX` discovery identity. `--env-file PATH`, `--state-dir PATH`, `--native-app PATH`, and `--no-browser` support different environments. Paths are safe command arguments; tokens are not. Press Ctrl-C to stop. There is no persistent background service installed.
+`--name NAME` sets the friendly name shown in Muse and the preview (default **MacMuse**); it keeps the app-compatible `MuseGadgetXXXXXX` discovery identity. `--env-file PATH`, `--state-dir PATH`, `--native-app PATH`, and `--no-browser` support different environments. Paths are safe command arguments; tokens are not. Press Ctrl-C to stop. There is no persistent background service installed.
 
 ## Verify actual delivery
 
-Use `muse-mac run --request-avatar --request-cards` to ask your paired Muse once, after registration, to send its transparent character, current watches, and next event. These opt-in requests send chat messages to Muse. A request acknowledgement does not prove delivery; check the received command count and visible content.
+Use `muse-mac run --request-avatar` to ask your paired Muse once, after registration, to send its existing character and a caption. These opt-in requests send chat messages to Muse. A request acknowledgement does not prove delivery; check the received command count and visible content.
 
 Ask your Muse:
 
-> On my MacMuse gadget, call pocket.set_status with text "SDK connection verified". Then call pocket.get_status and report the result. Send your character through display.draw_url as a public HTTPS image. Tell me if any command fails.
+> On my MacMuse gadget, call display.set_caption with text "SDK connection verified". Then call display.get_status and report the result. Send your character through display.draw_url as a public HTTPS image. Tell me if any command fails.
 
 An accepted command increments the preview's received count. A visible exact caption verifies delivery. A character verifies the separate download and rendering path. Failed image updates preserve the previous character. Images are fitted inside a 480×480 canvas and dithered to black and white, preserving PNG alpha transparency. An opaque source image retains its background; ask Muse for a transparent PNG to show only the avatar.
 
-## Hours preview
-
-Click the compact timeline to open the active prayer hour; the small × returns to Muse and its cards. The full timeline highlights the current hour, with arrows to browse and a Now control to resume following the clock. The header scrolls away with the prayers. Settings select Benedictine or modern hours and 12/24-hour time. This is an ordinary study preview with variable-text markers, not yet a verified calendar or complete rite-specific office.
-
-## Commands
+## Test commands
 
 | Command | Required parameters | Behavior |
 | --- | --- | --- |
-| `pocket.set_status` | `text` | Caption, up to 240 UTF-8 bytes |
-| `display.draw_url` | `url` | Public HTTPS image, up to 5 MB |
-| `pocket.set_watch_digest` | `payload` | JSON string with `updated` and `items` |
-| `pocket.set_next_up` | `payload` | JSON string with `updated`, `title`, `when`, `ends`, `detail` |
-| `pocket.get_status` | none | Connection state, command count and last command; excludes private content |
+| `display.set_caption` | `text` | Display plain text, up to 240 UTF-8 bytes |
+| `display.draw_url` | `url` | Download and render a public HTTPS image, up to 5 MB |
+| `display.get_status` | none | Connection, accepted-command count, last command; no private content |
 
-For watch/event commands, `payload` is a **serialized JSON string**, using scalar parameter types understood by the SDK command registry. Every timestamp needs an ISO 8601 timezone offset or `Z`.
+These are sample commands for exercising the transport. Product-specific
+features and UIs belong in separate applications. The hero illustrates a custom phone-style UI. The included default preview shows
+connection diagnostics, an image, and a caption. An application can use
+`muse_mac.host.Application` to supply its own state factory, executor, explicit
+command registry, preview HTML, read-only routes, and post-registration callback.
+The adapter continues to own Bluetooth pairing and the upstream encrypted session.
 
-Example decoded watch payload (serialize this object into `payload`):
+```python
+from muse_mac.host import Application, main
 
-```json
-{
-  "updated": "2026-10-03T10:00:00Z",
-  "items": [
-    {"label": "Example delivery", "state": "watching", "note": "Awaiting an update", "checked": "2026-10-03T09:50:00Z"}
-  ]
-}
+profile = Application(
+    state_factory=MyState,
+    executor_factory=MyExecutor,
+    command_specs=MY_COMMANDS,
+    preview_path="my-preview.html",
+)
+main(profile)
 ```
 
-A digest replaces the list; at most ten items, and an empty list clears it. Cards become stale after 24 hours without updates. An event needs an explicit end time, expires an hour after that end, and computes its countdown locally. An empty title clears it. The gadget receives curated payloads; it does not access calendar, task, or watch internals by itself.
+`MyExecutor.run(command, params, timeout_ms=None)` returns the SDK's command
+result. The state supplies a lock, a data mapping, optional PNG image bytes,
+`set(**values)`, and `snapshot()`. Register only the commands your application
+needs. Custom applications are trusted local code, not plugins loaded remotely.
 
 ## Privacy and security
 
@@ -106,8 +126,6 @@ A digest replaces the list; at most ten items, and an empty list clears it. Card
 
 The SDK currently registers the desktop device with its upstream `linux` / `homehub` compatibility metadata. The local pairing firmware version identifies the macOS adapter. Remote OTA is not advertised. A future upstream platform-neutral device description can replace this compatibility choice.
 
-The hours strip in the example preview is an optional local UI demonstration using a fixed Central-time schedule. It is not part of the SDK transport or an authoritative liturgical calendar.
-
 ## Development
 
 ```sh
@@ -120,12 +138,12 @@ The SDK dependency is pinned to commit `b1a3822995a51c0203cd1f3d72c1c656b8c3e620
 Before publishing:
 
 ```sh
-python scripts/check-secrets.py
+python3 scripts/check-secrets.py --include-untracked
 gitleaks git --redact --no-banner
 ```
 
-The custom checker scans tracked files and all reachable history against locally supplied credential values without printing matches. Gitleaks adds general credential-pattern detection. Neither check makes private images or pairing files safe to publish.
+The custom checker scans public candidate files and reachable/reflog history, including commit metadata. Supply `--private-file PATH` for each local token or pairing file to also check exact credential values and common encodings without printing matches. Gitleaks adds general credential-pattern detection. Neither check makes private images or pairing files safe to publish.
 
 ## License
 
-Apache 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE). Upstream SDK copyright and license notices remain with the installed dependency. Proprietary SDK avatars are not included. Muse's SDK token terms are separate from this source license.
+Apache 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE). Upstream SDK copyright and license notices remain with the installed dependency. The README hero’s Jolly-derived artwork and product marks are outside this project’s Apache grant; see NOTICE. Muse's SDK token terms are separate from this source license.

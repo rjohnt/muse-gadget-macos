@@ -19,11 +19,9 @@ def spec(description, fields):
 
 
 COMMANDS = {
-    'pocket.set_status': spec('Set the caption on the Mac Pocket preview. Plain text, at most 240 UTF-8 bytes.', [('text', 'string', 'Short caption')]),
-    'display.draw_url': spec('Download a public HTTPS character image and render it on the Mac Pocket preview.', [('url', 'string', 'HTTPS image URL')]),
-    'pocket.set_watch_digest': spec('Replace the watch list. Send JSON as the payload string: updated (ISO time with offset), items (max 10), each with label, state, note, checked (ISO time with offset). Empty items clears the list.', [('payload', 'string', 'Serialized JSON digest')]),
-    'pocket.set_next_up': spec('Replace the next event. Send JSON as the payload string: updated, title, when, ends (ISO times with offsets), detail. Empty title clears it. Countdown is computed locally.', [('payload', 'string', 'Serialized JSON event')]),
-    'pocket.get_status': spec('Verify the Mac display gadget: connection state, received command count, last command; no private display content.', []),
+    'display.set_caption': spec('Set the caption on the Mac test preview. Plain text, at most 240 UTF-8 bytes.', [('text', 'string', 'Short caption')]),
+    'display.draw_url': spec('Download a public HTTPS character image and render it on the Mac test preview.', [('url', 'string', 'HTTPS image URL')]),
+    'display.get_status': spec('Verify the Mac display gadget: connection state, received command count, last command; no private display content.', []),
 }
 
 
@@ -88,7 +86,7 @@ class DisplayState:
         self.lock = threading.RLock()
         self.data = {'connection': 'not paired', 'bluetooth': 'not started', 'caption': 'Waiting for your Muse.',
                      'phone_connected': False, 'pairing_confirmed': False,
-                     'commands_received': 0, 'last_command': None, 'watches': None, 'next_up': None,
+                     'commands_received': 0, 'last_command': None,
                      'image_revision': 0, 'device_name': None}
         self.image = None
 
@@ -99,16 +97,6 @@ class DisplayState:
     def snapshot(self):
         with self.lock:
             result = deepcopy(self.data)
-        now = datetime.now(timezone.utc)
-        for key in ('watches', 'next_up'):
-            card = result[key]
-            if card:
-                card['stale'] = (now - timestamp(card['updated'])).total_seconds() >= 86400
-        event = result['next_up']
-        if event and event.get('title'):
-            event['seconds_until'] = int((timestamp(event['when']) - now).total_seconds())
-            if (now - timestamp(event['ends'])).total_seconds() >= 3600:
-                result['next_up'] = None
         return result
 
 
@@ -120,42 +108,16 @@ class DisplayExecutor:
         if command not in COMMANDS:
             return {'ok': False, 'error': 'Command not supported'}
         try:
-            if command == 'pocket.get_status':
+            if command == 'display.get_status':
                 snapshot = self.state.snapshot()
                 return {'ok': True, 'payload': {key: snapshot[key] for key in ('connection', 'commands_received', 'last_command')}}
-            if command == 'pocket.set_status':
+            if command == 'display.set_caption':
                 self.state.set(caption=text(params.get('text'), 240))
             elif command == 'display.draw_url':
                 image = download_image(text(params.get('url'), 4096))
                 with self.state.lock:
                     self.state.image = image
                     self.state.data['image_revision'] += 1
-            else:
-                raw = text(params.get('payload'), 16384)
-                payload = json.loads(raw)
-                if not isinstance(payload, dict):
-                    raise ValueError('Payload must be a JSON object')
-                timestamp(payload.get('updated'))
-                if command == 'pocket.set_watch_digest':
-                    items = payload.get('items')
-                    if not isinstance(items, list) or len(items) > 10:
-                        raise ValueError('Expected at most 10 watch items')
-                    cleaned = []
-                    for item in items:
-                        if not isinstance(item, dict):
-                            raise ValueError('Watch must be an object')
-                        cleaned.append({key: text(item.get(key), size) for key, size in [('label', 80), ('state', 32), ('note', 200), ('checked', 50)]})
-                        timestamp(item['checked'])
-                    self.state.set(watches={'updated': payload['updated'], 'items': cleaned})
-                else:
-                    title = text(payload.get('title'), 120)
-                    if not title:
-                        self.state.set(next_up=None)
-                    else:
-                        when, ends = timestamp(payload.get('when')), timestamp(payload.get('ends'))
-                        if ends < when:
-                            raise ValueError('Event end precedes its start')
-                        self.state.set(next_up={'updated': payload['updated'], 'title': title, 'when': payload['when'], 'ends': payload['ends'], 'detail': text(payload.get('detail', ''), 240)})
             with self.state.lock:
                 self.state.data['commands_received'] += 1
                 self.state.data['last_command'] = command
