@@ -6,7 +6,7 @@ This is a community project, not an official Meta or Xteink product. The adapter
 
 ## Status
 
-Phone discovery, encrypted community pairing, device-credential provisioning and authenticated Muse command registration have been verified on an Apple Silicon Mac with the Muse iOS app. The initial combined name/service advertisement appeared unnamed and was not discovered by Muse. Name-only advertising delivered the complete `MuseGadgetXXXXXX` name and enabled pairing. Eight local adapter tests and the pinned SDK's 137 tests pass. Actual display-command and image delivery are still being validated; successful registration alone does not prove a command was executed.
+Phone discovery, encrypted community pairing, device-credential provisioning and authenticated Muse command registration have been verified on an Apple Silicon Mac with the Muse iOS app. The initial combined name/service advertisement appeared unnamed and was not discovered by Muse. Name-only advertising delivered the complete `MuseGadgetXXXXXX` name and enabled pairing. Actual character-image and caption command delivery have also been verified. Local adapter tests and the pinned SDK's 137 tests pass; physical-reader behavior remains untested.
 
 By default, CoreBluetooth advertises only the complete gadget name. The SDK service and characteristics remain published in GATT and available after connecting. `--advertisement name-and-service` also puts the 128-bit service UUID in the advertisement, but macOS can drop the longer name when space is tight. Name-only mode cannot work with a scanner that requires that UUID in the advertisement; combined mode may fail a scanner requiring the name. These app compatibility limits need physical testing. Apple's peripheral advertising API also does not expose BlueZ's arbitrary manufacturer-data field. Whether a Muse app version requires that field must be checked with the phone. The Mac adapter cannot actively cancel a central's connection; failed setup tears down the GATT service and requires restarting pairing.
 
@@ -50,15 +50,17 @@ To view the empty interface without credentials or Bluetooth:
 .venv/bin/muse-mac preview
 ```
 
-`--name NAME` sets the friendly name shown in Muse and the preview (default **MacMuse**); it keeps the app-compatible `MuseGadgetXXXXXX` discovery identity. `--env-file PATH`, `--state-dir PATH`, `--native-app PATH`, and `--no-browser` support different environments. Paths are safe command arguments; tokens are not. Press Ctrl-C to stop. There is no persistent background service installed.
+`--character-name NAME` sets the heading beneath the avatar. `--name NAME` sets the friendly name shown in Muse and the preview (default **MacMuse**); it keeps the app-compatible `MuseGadgetXXXXXX` discovery identity. `--env-file PATH`, `--state-dir PATH`, `--native-app PATH`, and `--no-browser` support different environments. Paths are safe command arguments; tokens are not. Press Ctrl-C to stop. There is no persistent background service installed.
 
 ## Verify actual delivery
+
+Use `muse-mac run --request-avatar --request-cards` to ask your paired Muse once, after registration, to send its transparent character, current watches, and next event. These opt-in requests send chat messages to Muse. A request acknowledgement does not prove delivery; check the received command count and visible content.
 
 Ask your Muse:
 
 > On my MacMuse gadget, call pocket.set_status with text "SDK connection verified". Then call pocket.get_status and report the result. Send your character through display.draw_url as a public HTTPS image. Tell me if any command fails.
 
-An accepted command increments the preview's received count. A visible exact caption verifies delivery. A character verifies the separate download and rendering path. Failed image updates preserve the previous character. Images are fitted inside a 480×480 canvas and dithered to black and white.
+An accepted command increments the preview's received count. A visible exact caption verifies delivery. A character verifies the separate download and rendering path. Failed image updates preserve the previous character. Images are fitted inside a 480×480 canvas and dithered to black and white, preserving PNG alpha transparency. An opaque source image retains its background; ask Muse for a transparent PNG to show only the avatar.
 
 ## Commands
 

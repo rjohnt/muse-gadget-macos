@@ -72,11 +72,14 @@ def download_image(url):
         if image.width * image.height > 16_000_000:
             raise ValueError('Image dimensions too large')
         image.thumbnail((480, 480))
-        canvas = Image.new('RGB', (480, 480), 'white')
+        canvas = Image.new('RGBA', (480, 480), (255, 255, 255, 0))
         rgba = image.convert('RGBA')
-        canvas.paste(rgba, ((480-image.width)//2, (480-image.height)//2), rgba)
+        canvas.paste(rgba, ((480-image.width)//2, (480-image.height)//2))
+        paper = Image.new('RGBA', canvas.size, 'white')
+        monochrome = Image.alpha_composite(paper, canvas).convert('L').convert('1').convert('RGBA')
+        monochrome.putalpha(canvas.getchannel('A'))
         output = io.BytesIO()
-        canvas.convert('L').convert('1').save(output, format='PNG')
+        monochrome.save(output, format='PNG')
     return output.getvalue()
 
 

@@ -95,7 +95,9 @@ def test_image_pipeline_is_bilevel_and_keeps_aspect_ratio():
         output = download_image('https://example.org/image.jpg')
     image = Image.open(io.BytesIO(output))
     assert image.size == (480, 480)
-    assert image.mode == '1'
+    assert image.mode == 'RGBA'
+    assert set(image.convert('RGB').get_flattened_data()) <= {(0, 0, 0), (255, 255, 255)}
+    assert image.getpixel((0, 0))[3] == 0
 
 
 def test_preview_read_only_no_token_and_invalid_host():
@@ -132,3 +134,53 @@ def test_transport_advertisement_modes_and_process_arguments(monkeypatch):
     assert popen.call_args.args[0][-1] == 'name-and-service'
     with pytest.raises(ValueError):
         MacTransport(Path('/test/native'), 'MuseGadget123456', lambda _: None, lambda: None, lambda _: None, advertisement='invalid')
+
+
+def test_character_request_ack_and_failure_do_not_expose_response():
+    import asyncio
+    from muse_mac.host import request_character
+    from unittest.mock import AsyncMock
+    state = DisplayState()
+    session = type('Session', (), {})()
+    session.send_chat = AsyncMock(return_value={'ok': True, 'response': {'private': 'not for preview'}})
+    asyncio.run(request_character(session, state))
+    assert state.snapshot()['avatar_request'] == 'sent'
+    assert 'not for preview' not in json.dumps(state.snapshot())
+    assert 'display.draw_url' in session.send_chat.call_args.args[0]
+    session.send_chat = AsyncMock(side_effect=RuntimeError('private response'))
+    asyncio.run(request_character(session, state))
+    assert state.snapshot()['avatar_request'] == 'failed'
+    assert 'private response' not in json.dumps(state.snapshot())
+
+
+def test_transparent_character_keeps_alpha():
+    source = Image.new('RGBA', (480, 480), (255, 255, 255, 0))
+    source.putpixel((240, 240), (0, 0, 0, 128))
+    buf = io.BytesIO()
+    source.save(buf, format='PNG')
+    class Response(io.BytesIO):
+        def __enter__(self): return self
+        def __exit__(self, *_args): self.close()
+    class Opener:
+        def open(self, *_args, **_kwargs): return Response(buf.getvalue())
+    with patch('muse_mac.commands.validate_url'), patch('muse_mac.commands.urllib.request.build_opener', return_value=Opener()):
+        image = Image.open(io.BytesIO(download_image('https://example.org/avatar.png')))
+    assert image.getpixel((0, 0))[3] == 0
+    assert image.getpixel((240, 240))[3] == 128
+
+
+def test_cards_request_is_explicit_and_does_not_expose_response():
+    import asyncio
+    from muse_mac.host import request_cards
+    from unittest.mock import AsyncMock
+    state = DisplayState()
+    session = type('Session', (), {})()
+    session.send_chat = AsyncMock(return_value={'ok': True, 'response': 'private response'})
+    asyncio.run(request_cards(session, state))
+    assert state.snapshot()['cards_request'] == 'sent'
+    assert 'private response' not in json.dumps(state.snapshot())
+    prompt = session.send_chat.call_args.args[0]
+    assert 'pocket.set_watch_digest' in prompt and 'pocket.set_next_up' in prompt
+    session.send_chat = AsyncMock(side_effect=RuntimeError('private response'))
+    asyncio.run(request_cards(session, state))
+    assert state.snapshot()['cards_request'] == 'failed'

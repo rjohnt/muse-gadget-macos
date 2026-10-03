@@ -98,13 +98,48 @@ def verify_and_save(credentials, commit):
         raise ProvisionFailed('error_storage')
 
 
-async def run_connection(ident, token, state, stop, display_name='MacMuse'):
+async def request_character(session, state):
+    state.set(avatar_request='pending')
+    try:
+        result = await session.send_chat(
+            'Please send your actual existing Muse character/avatar to the Mac display gadget that sent this message. '
+            'Use display.draw_url with a public HTTPS URL to a transparent-background PNG, ideally 480x480. '
+            'Show only your avatar, with no backdrop, background panel, or text baked into the image. '
+            'Use your own character, not an unrelated placeholder. Then call pocket.set_status with a short caption '
+            'that does not repeat your name or introduce yourself. '
+            'If you cannot access your character or either command fails, explain that in chat; do not claim success.'
+        )
+        state.set(avatar_request='sent' if result.get('ok') else 'failed')
+    except Exception:
+        state.set(avatar_request='failed')
+
+
+async def request_cards(session, state):
+    state.set(cards_request='pending')
+    try:
+        result = await session.send_chat(
+            'Populate this Mac display gadget with my actual current open watches and next upcoming event. '
+            'Call pocket.set_watch_digest and pocket.set_next_up using their registered schemas; '
+            'each payload argument must be a serialized JSON string. Use timezone-qualified ISO timestamps. '
+            'The next event needs when and ends; if the end is unavailable, explain that rather than inventing it. '
+            'Curate concise labels and notes for a small display. Do not include account numbers or credentials. '
+            'Use only data you can access now. If there are no watches send an empty items list; '
+            'if there is no upcoming event send an empty title. Explain any failed command in chat.'
+        )
+        state.set(cards_request='sent' if result.get('ok') else 'failed')
+    except Exception:
+        state.set(cards_request='failed')
+
+
+async def run_connection(ident, token, state, stop, display_name='MacMuse', request_avatar=False, request_live_cards=False):
     # Retain the upstream reconnect/rotation logic; replace its default shell
     # registry with display commands before constructing the service.
     service.COMMAND_SPECS = COMMANDS
     client = service.Service(ident, DisplayExecutor(state), sdk_token=token,
                              display_name=display_name)
     task = asyncio.create_task(client.run())
+    requested = False
+    cards_requested = False
     try:
         while not stop.is_set() and not task.done():
             session = client._current
@@ -113,6 +148,12 @@ async def run_connection(ident, token, state, stop, display_name='MacMuse'):
             with state.lock:
                 advertising = state.data['bluetooth'] == 'advertising'
             state.set(connection='connected' if registered else 'connecting' if paired else 'ready to pair' if advertising else 'not paired')
+            if registered and request_avatar and not requested:
+                requested = True
+                await request_character(session, state)
+            if registered and request_live_cards and not cards_requested:
+                cards_requested = True
+                await request_cards(session, state)
             await asyncio.sleep(0.5)
         client.stop()
         await task
@@ -131,12 +172,17 @@ def main():
     parser.add_argument('--native-app', type=Path, default=Path('build/Muse Mac Gadget.app'))
     parser.add_argument('--no-browser', action='store_true')
     parser.add_argument('--name', default='MacMuse', help='Friendly name in Muse and the preview; BLE discovery identity stays unchanged')
+    parser.add_argument('--character-name', default='Your Muse', help='Heading below the character in the preview')
+    parser.add_argument('--request-avatar', action='store_true', help='Ask Muse once, after registration, to send its actual character to this display')
+    parser.add_argument('--request-cards', action='store_true', help='Ask Muse once to send current watches and the next event')
     parser.add_argument('--advertisement', choices=['name-only', 'name-and-service'], default='name-only',
                         help='Prioritize the full name, or advertise the name and 128-bit service UUID')
     parser.add_argument('--timeout', type=int, default=600, help='Pairing window in seconds, 30–600')
     args = parser.parse_args()
     if not args.name.strip() or len(args.name.encode('utf-8')) > 80 or any(ord(c)<32 for c in args.name):
         parser.error('Friendly name must be 1–80 UTF-8 bytes without control characters')
+    if not args.character_name.strip() or len(args.character_name.encode('utf-8')) > 80 or any(ord(c)<32 for c in args.character_name):
+        parser.error('Character name must be 1–80 UTF-8 bytes without control characters')
     if platform.system() != 'Darwin' and args.mode != 'preview':
         parser.error('Pairing and live sessions require macOS')
     if not 30 <= args.timeout <= 600:
@@ -148,7 +194,7 @@ def main():
     signal.signal(signal.SIGINT, lambda *_: stop.set())
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
     state = DisplayState()
-    state.set(connection='offline preview' if args.mode == 'preview' else 'not paired', display_name=args.name)
+    state.set(connection='offline preview' if args.mode == 'preview' else 'not paired', display_name=args.name, character_name=args.character_name)
     transport = controller = None
     timer = None
     server = None
@@ -228,7 +274,7 @@ def main():
         if args.mode == 'preview':
             stop.wait()
         else:
-            asyncio.run(run_connection(ident, token, state, stop, args.name))
+            asyncio.run(run_connection(ident, token, state, stop, args.name, args.request_avatar, args.request_cards))
     except (ValueError, OSError) as exc:
         # Only our deliberate validation messages are printed, never arbitrary
         # OS/network paths or upstream exception text.
